@@ -85,7 +85,8 @@ sih 2nd ps/
 ├── docs/
 │   ├── API.md                          # Full REST API specification
 │   ├── HARDWARE_PROTOCOL.md            # IoT Edge microcontroller protocol & buffer specs
-│   └── DEPLOYMENT.md                   # Production deployment & PostgreSQL setup guide
+│   ├── DEPLOYMENT.md                   # Production deployment & PostgreSQL setup guide
+│   └── PRESENTATION_SCRIPT.md          # 5-Minute video presentation script (SIH 2026)
 ├── backend/
 │   ├── pyproject.toml                  # Python package configuration
 │   ├── requirements.txt                # Python dependencies
