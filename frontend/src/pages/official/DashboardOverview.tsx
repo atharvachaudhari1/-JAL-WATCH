@@ -11,9 +11,115 @@ import {
   Sparkles,
   RefreshCw,
   Search,
+  Cpu,
+  Zap,
+  Gauge,
+  Radio,
 } from 'lucide-react';
 import { api } from '../../lib/api';
 import { DashboardSummary, ConnectionListItem, AlertItem, OfficialComplaintListItem } from '../../types';
+
+// ── HH001 Live Hardware Status Card ──────────────────────────────────────────
+interface HH001Status {
+  household_id: string;
+  flow_rate: number;
+  status: string;
+  adc: number;
+  supply_expected: boolean;
+  pressure_bar?: number;
+  fhtc_id?: string;
+  computed_status?: string;
+  timestamp?: string;
+}
+
+const HH001LiveCard: React.FC<{ onSendReading: () => void; data: HH001Status | null; sending: boolean }> = ({ onSendReading, data, sending }) => {
+  const isFunc = data?.status === 'FUNCTIONAL';
+  return (
+    <div className="bg-slate-900 border border-cyan-800/60 rounded-2xl p-5 shadow-lg relative overflow-hidden">
+      {/* Glow accent */}
+      <div className="absolute -top-6 -right-6 w-28 h-28 bg-cyan-500/10 rounded-full blur-2xl pointer-events-none" />
+
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center space-x-2">
+          <div className={`w-2.5 h-2.5 rounded-full ${isFunc ? 'bg-emerald-400 animate-pulse' : 'bg-rose-400'}`} />
+          <span className="text-xs font-bold text-cyan-300 tracking-widest uppercase">HH001 • Live Hardware</span>
+        </div>
+        <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold border ${
+          isFunc
+            ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
+            : 'bg-rose-500/10 text-rose-400 border-rose-500/30'
+        }`}>
+          {data?.status ?? 'AWAITING'}
+        </span>
+      </div>
+
+      <div className="grid grid-cols-4 gap-3 mb-4">
+        {/* Flow Rate */}
+        <div className="bg-slate-950 rounded-xl p-3 border border-slate-800 col-span-2">
+          <div className="flex items-center space-x-1.5 text-slate-400 mb-1">
+            <Waves className="w-3.5 h-3.5 text-cyan-400" />
+            <span className="text-[10px] font-medium">Flow Rate</span>
+          </div>
+          <div className="text-2xl font-bold text-white font-mono">
+            {data?.flow_rate?.toFixed(2) ?? '--'}
+            <span className="text-xs font-normal text-slate-400 ml-1">L/min</span>
+          </div>
+        </div>
+
+        {/* Pressure */}
+        <div className="bg-slate-950 rounded-xl p-3 border border-slate-800">
+          <div className="flex items-center space-x-1 text-slate-400 mb-1">
+            <Gauge className="w-3.5 h-3.5 text-blue-400" />
+            <span className="text-[10px] font-medium">Pressure</span>
+          </div>
+          <div className="text-lg font-bold text-blue-300 font-mono">
+            {data?.pressure_bar?.toFixed(1) ?? '--'}
+            <span className="text-[10px] font-normal text-slate-400 ml-1">bar</span>
+          </div>
+        </div>
+
+        {/* ADC */}
+        <div className="bg-slate-950 rounded-xl p-3 border border-slate-800">
+          <div className="flex items-center space-x-1 text-slate-400 mb-1">
+            <Cpu className="w-3.5 h-3.5 text-purple-400" />
+            <span className="text-[10px] font-medium">ADC</span>
+          </div>
+          <div className="text-lg font-bold text-purple-300 font-mono">
+            {data?.adc ?? '--'}
+          </div>
+        </div>
+      </div>
+
+      <div className="flex items-center justify-between">
+        <div className="flex items-center space-x-3 text-xs text-slate-400">
+          <span className="flex items-center space-x-1">
+            <Radio className="w-3 h-3 text-cyan-400" />
+            <span>Supply: <span className={data?.supply_expected ? 'text-emerald-400 font-semibold' : 'text-slate-500'}>{data?.supply_expected ? 'Active' : 'Off'}</span></span>
+          </span>
+          <span className="flex items-center space-x-1">
+            <Zap className="w-3 h-3 text-amber-400" />
+            <span className="font-mono text-[10px] text-slate-500">{data?.fhtc_id ?? 'MH-PUN-SHIR-001'}</span>
+          </span>
+        </div>
+        <button
+          onClick={onSendReading}
+          disabled={sending}
+          className="flex items-center space-x-1.5 text-xs px-3 py-1.5 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white font-semibold transition disabled:opacity-50"
+        >
+          <RefreshCw className={`w-3 h-3 ${sending ? 'animate-spin' : ''}`} />
+          <span>{sending ? 'Sending...' : 'Push Reading'}</span>
+        </button>
+      </div>
+
+      {data?.timestamp && (
+        <div className="mt-2 text-[10px] text-slate-600 text-right">
+          Last sync: {new Date(data.timestamp).toLocaleTimeString()}
+        </div>
+      )}
+    </div>
+  );
+};
+// ─────────────────────────────────────────────────────────────────────────────
 
 export const DashboardOverview: React.FC = () => {
   const navigate = useNavigate();
@@ -24,6 +130,55 @@ export const DashboardOverview: React.FC = () => {
   const [activity, setActivity] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
+
+  // ── HH001 hardware device state ──────────────────────────────────────────
+  const [hh001, setHh001] = useState<HH001Status | null>({
+    household_id: 'HH001',
+    flow_rate: 6.00,
+    status: 'FUNCTIONAL',
+    adc: 4095,
+    supply_expected: true,
+    pressure_bar: 5.0,
+    fhtc_id: 'MH-PUN-SHIR-001',
+    computed_status: 'FUNCTIONAL',
+  });
+  const [hh001Sending, setHh001Sending] = useState(false);
+
+  const pushHH001Reading = async () => {
+    setHh001Sending(true);
+    try {
+      const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api/v1';
+      const res = await fetch(`${API_BASE}/ingest/hardware`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          household_id: 'HH001',
+          flow_rate: 6.00,
+          status: 'FUNCTIONAL',
+          adc: 4095,
+          supply_expected: true,
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setHh001({
+          household_id: data.household_id,
+          flow_rate: data.flow_rate,
+          status: data.device_status,
+          adc: data.adc_raw ?? 4095,
+          supply_expected: data.supply_expected,
+          pressure_bar: data.pressure_bar,
+          fhtc_id: data.fhtc_id,
+          computed_status: data.computed_status,
+          timestamp: data.timestamp,
+        });
+      }
+    } catch (e) {
+      console.error('HH001 push failed:', e);
+    } finally {
+      setHh001Sending(false);
+    }
+  };
 
   const loadData = async () => {
     setIsLoading(true);
@@ -122,6 +277,13 @@ export const DashboardOverview: React.FC = () => {
           </button>
         </div>
       </div>
+
+      {/* HH001 Live Hardware Device Card */}
+      <HH001LiveCard
+        data={hh001}
+        onSendReading={pushHH001Reading}
+        sending={hh001Sending}
+      />
 
       {/* 5 KPI Summary Cards */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">

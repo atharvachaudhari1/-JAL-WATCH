@@ -99,26 +99,26 @@ def seed_database(db: Session):
     # 4. Create Devices & Connections
     wards = ["Ward 1 (Gaothan)", "Ward 2 (Vikas Nagar)", "Ward 3 (Bhim Nagar)", "Ward 4 (Malshiras Road)"]
     households = [
-        ("HH-101 (Patil)", wards[0]),
-        ("HH-102 (Shinde)", wards[0]),
-        ("HH-103 (Kadam)", wards[0]),
-        ("HH-104 (Bhosale)", wards[0]),
-        ("HH-105 (Gaikwad)", wards[1]),
-        ("HH-106 (More)", wards[1]),
-        ("HH-107 (Pawar)", wards[1]),
-        ("HH-108 (Salunke)", wards[1]),
-        ("HH-109 (Chavan)", wards[2]),
-        ("HH-110 (Mane)", wards[2]),
-        ("HH-111 (Kamble)", wards[2]),
-        ("HH-112 (Lokhande)", wards[2]),
-        ("HH-113 (Thorat)", wards[3]),
-        ("HH-114 (Jagtap)", wards[3]),
-        ("HH-115 (Wagh)", wards[3]),
+        ("HH001 (Patil)",        wards[0]),  # ← HH001: primary demo device, FUNCTIONAL
+        ("HH-102 (Shinde)",      wards[0]),
+        ("HH-103 (Kadam)",       wards[0]),
+        ("HH-104 (Bhosale)",     wards[0]),
+        ("HH-105 (Gaikwad)",     wards[1]),
+        ("HH-106 (More)",        wards[1]),
+        ("HH-107 (Pawar)",       wards[1]),
+        ("HH-108 (Salunke)",     wards[1]),
+        ("HH-109 (Chavan)",      wards[2]),
+        ("HH-110 (Mane)",        wards[2]),
+        ("HH-111 (Kamble)",      wards[2]),
+        ("HH-112 (Lokhande)",    wards[2]),
+        ("HH-113 (Thorat)",      wards[3]),
+        ("HH-114 (Jagtap)",      wards[3]),
+        ("HH-115 (Wagh)",        wards[3]),
         ("HH-116 (Shinde-West)", wards[3]),
-        ("HH-117 (Gholap)", wards[0]),
+        ("HH-117 (Gholap)",      wards[0]),
         ("HH-118 (Deshmukh-East)", wards[1]),
         ("HH-119 (Suryavanshi)", wards[2]),
-        ("HH-120 (Tambe)", wards[3]),
+        ("HH-120 (Tambe)",       wards[3]),
     ]
 
     connections = []
@@ -258,6 +258,27 @@ def seed_database(db: Session):
 
     db.add_all(readings)
     db.flush()
+
+    # ── HH001 pinned live reading (your hardware device default payload) ──────
+    # Ensures HH001 always shows as FUNCTIONAL with flow_rate=6.0 L/min on dashboard
+    hh001_conn = db.query(Connection).filter(Connection.id == "conn-001").first()
+    if hh001_conn and hh001_conn.device_id:
+        # ADC 4095 → pressure = (4095/4095) * 5.0 = 5.0 bar (full scale)
+        hh001_pinned = SensorReading(
+            device_id=hh001_conn.device_id,
+            connection_id=hh001_conn.id,
+            observed_at=now - timedelta(minutes=2),   # 2 minutes ago = "live"
+            received_at=now - timedelta(minutes=2),
+            flow_rate=6.00,
+            pressure=round((4095 / 4095.0) * 5.0, 2),  # = 5.0 bar
+            volume=8400.0,
+            turbidity=1.1,
+            ph=7.3,
+            source="device",
+            sequence_number=9001,
+            quality_flags_json=json.dumps(["VALIDATED", "FUNCTIONAL"])
+        )
+        db.add(hh001_pinned)
 
     # 6. Create Realistic Rule-Based Alerts
     # Alert for Connection 2 (No flow during supply window)

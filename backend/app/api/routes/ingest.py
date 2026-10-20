@@ -19,6 +19,19 @@ from app.core.config import settings
 
 router = APIRouter(tags=["IoT Device Ingestion & Telemetry"])
 
+# ── Hardware Device Payload Schema (matches your ESP32 JSON exactly) ─────────
+from pydantic import BaseModel as _BaseModel
+
+class HardwarePayload(_BaseModel):
+    household_id: str               # e.g. "HH001"
+    flow_rate: float                # L/min
+    status: str                     # "FUNCTIONAL" | "NO_FLOW" | "FAULT"
+    adc: Optional[int] = None       # Raw ADC value (0-4095)
+    supply_expected: bool = True    # Whether supply window is active
+    pressure: Optional[float] = None
+    battery_level: Optional[float] = None
+    sequence_number: Optional[int] = None
+
 @router.post("/ingest/readings", response_model=ReadingIngestResponse)
 def ingest_readings(
     payload: BatchReadingIngestPayload,
@@ -161,6 +174,135 @@ def ingest_readings(
         alerts_triggered=alerts_triggered_count,
         message=f"Ingested {accepted_count} telemetry records from device {payload.device_code}."
     )
+
+
+# ── Hardware Simple Ingest (matches your ESP32 JSON payload exactly) ──────────
+@router.post("/ingest/hardware", summary="Hardware Device Simple Ingest (HH001 format)")
+def ingest_hardware(
+    payload: HardwarePayload,
+    x_device_key: Optional[str] = Header(None, alias="X-Device-Key"),
+    db: Session = Depends(get_db)
+):
+    """
+    Accepts the exact JSON your hardware device sends:
+      {"household_id":"HH001","flow_rate":6.00,"status":"FUNCTIONAL","adc":4095,"supply_expected":true}
+
+    Maps household_id → FHTC connection → stores reading + runs alert rules.
+    Returns the current connection status back to the device.
+    """
+    if not settings.DEVICE_INGESTION_ENABLED:
+        raise HTTPException(status_code=503, detail="Device ingestion disabled.")
+
+    # Map household_id to connection (household_reference contains HH001 etc.)
+    connection = db.query(Connection).filter(
+        Connection.household_reference.contains(payload.household_id)
+    ).first()
+
+    # Fallback: try fhtc_id suffix match (e.g. HH001 → MH-PUN-SHIR-001)
+    if not connection:
+        suffix = payload.household_id.replace("HH", "").lstrip("0")
+        fhtc_candidate = f"MH-PUN-SHIR-{int(suffix):03d}" if suffix.isdigit() else None
+        if fhtc_candidate:
+            connection = db.query(Connection).filter(
+                Connection.fhtc_id == fhtc_candidate
+            ).first()
+
+    if not connection:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No FHTC connection found for household_id '{payload.household_id}'. "
+                   f"Please register this household first."
+        )
+
+    if not connection.device_id:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Connection {connection.fhtc_id} has no paired IoT device."
+        )
+
+    device = connection.device
+
+    # Validate API key if provided
+    if x_device_key and device.api_key and x_device_key != device.api_key:
+        raise HTTPException(status_code=401, detail="Invalid X-Device-Key.")
+
+    now = datetime.now(timezone.utc)
+    gp_id = connection.gram_panchayat_id
+    thresholds = db.query(ThresholdSetting).filter(
+        ThresholdSetting.gram_panchayat_id == gp_id
+    ).first()
+
+    # Convert ADC → pressure estimate (0-4095 ADC → 0-5 bar linear mapping)
+    pressure = payload.pressure
+    if pressure is None and payload.adc is not None:
+        pressure = round((payload.adc / 4095.0) * 5.0, 2)
+
+    # Map status string → quality flags
+    flags = []
+    if payload.status == "FUNCTIONAL":
+        flags = ["VALIDATED", "FUNCTIONAL"]
+    elif payload.status == "NO_FLOW":
+        flags = ["ZERO_FLOW"]
+        if payload.supply_expected:
+            flags.append("SUPPLY_ACTIVE")
+    elif payload.status == "FAULT":
+        flags = ["SENSOR_FAULT"]
+    else:
+        flags = ["VALIDATED"]
+
+    reading = SensorReading(
+        device_id=device.id,
+        connection_id=connection.id,
+        observed_at=now,
+        received_at=now,
+        flow_rate=payload.flow_rate,
+        pressure=pressure,
+        source="device",
+        sequence_number=payload.sequence_number,
+        quality_flags_json=json.dumps(flags)
+    )
+    db.add(reading)
+
+    # Run alert rules
+    triggered_alerts = evaluate_reading_rules(
+        db=db,
+        connection=connection,
+        reading=reading,
+        thresholds=thresholds
+    )
+
+    # Update device heartbeat
+    device.last_seen_at = now
+    device.health_status = "HEALTHY"
+    if payload.battery_level is not None:
+        device.battery_level = payload.battery_level
+
+    db.commit()
+
+    # Compute derived status for response
+    computed_status = "FUNCTIONAL"
+    if payload.status == "NO_FLOW" and payload.supply_expected:
+        computed_status = "CRITICAL"
+    elif payload.status == "NO_FLOW":
+        computed_status = "NORMAL"
+    elif payload.status == "FAULT":
+        computed_status = "FAULT"
+
+    return {
+        "status": "accepted",
+        "household_id": payload.household_id,
+        "fhtc_id": connection.fhtc_id,
+        "flow_rate": payload.flow_rate,
+        "pressure_bar": pressure,
+        "adc_raw": payload.adc,
+        "device_status": payload.status,
+        "computed_status": computed_status,
+        "supply_expected": payload.supply_expected,
+        "alerts_triggered": len(triggered_alerts),
+        "quality_flags": flags,
+        "timestamp": now.isoformat(),
+        "message": f"Reading accepted for {connection.fhtc_id} ({payload.household_id})"
+    }
 
 @router.post("/devices/{device_id}/heartbeat")
 def device_heartbeat(
