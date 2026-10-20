@@ -1,0 +1,17 @@
+{
+  "name": "JalWatch - Rural Tap Monitoring",
+  "short_name": "JalWatch",
+  "description": "Functional Household Tap Connection (FHTC) Monitoring & Grievance Redressal",
+  "start_url": "/villager",
+  "display": "standalone",
+  "background_color": "#020617",
+  "theme_color": "#0284c7",
+  "icons": [
+    {
+      "src": "/vite.svg",
+      "sizes": "192x192",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
