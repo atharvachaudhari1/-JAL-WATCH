@@ -1,0 +1,66 @@
+services:
+  # ── Backend: FastAPI Web Service ──────────────────────────────────────────
+  - type: web
+    name: jalwatch-backend
+    runtime: python
+    region: singapore  # closest to India
+    plan: free
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: PYTHONPATH
+        value: .
+      - key: APP_ENV
+        value: production
+      - key: APP_NAME
+        value: JalWatch API
+      - key: API_V1_PREFIX
+        value: /api/v1
+      - key: DEMO_MODE
+        value: "true"
+      - key: DEVICE_INGESTION_ENABLED
+        value: "true"
+      - key: IMIS_INTEGRATION_ENABLED
+        value: "false"
+      - key: ACCESS_TOKEN_EXPIRE_MINUTES
+        value: "1440"
+      - key: UPLOAD_DIR
+        value: /tmp/uploads
+      - key: MAX_UPLOAD_MB
+        value: "5"
+      # Set these manually in Render dashboard (secrets):
+      # DATABASE_URL  → your Render PostgreSQL internal URL
+      # SECRET_KEY    → a long random secret
+      # FRONTEND_ORIGIN → your Render static site URL
+      - key: DATABASE_URL
+        sync: false   # fill in Render dashboard
+      - key: SECRET_KEY
+        generateValue: true
+      - key: FRONTEND_ORIGIN
+        sync: false   # fill in Render dashboard after frontend is deployed
+
+  # ── Frontend: React Static Site ───────────────────────────────────────────
+  - type: web
+    name: jalwatch-frontend
+    runtime: static
+    region: singapore
+    plan: free
+    rootDir: frontend
+    buildCommand: npm install && npm run build
+    staticPublishPath: dist
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    envVars:
+      - key: VITE_API_BASE_URL
+        sync: false   # fill in Render dashboard: https://jalwatch-backend.onrender.com/api/v1
+
+databases:
+  # ── PostgreSQL (free tier) ─────────────────────────────────────────────────
+  - name: jalwatch-db
+    databaseName: jalwatch
+    user: jalwatch_user
+    plan: free
+    region: singapore
